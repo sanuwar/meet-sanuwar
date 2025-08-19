@@ -1,12 +1,7 @@
-# app.py — Meet Sanuwar (tiny, beginner-friendly)
-# What this does:
-# 1) Load the saved retrieval index from Step 2 (data/retrieval_index.json)
-# 2) Load a shared system prompt (prompts/system_prompt.txt)
-# 3) For each message: find relevant chunks, ask gpt-4o-mini, show the answer
-# 4) Log unknown questions + optional name/email via your Step 3 helpers
-
 import os, json
+
 from pathlib import Path
+import re, datetime
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -27,30 +22,65 @@ SYSTEM_PROMPT_PATH = PROMPTS_DIR / "system_prompt.txt"
 load_dotenv(BASE / ".env")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ---------- (Option 1) Rebuild index if missing or when REBUILD_INDEX=1 ----------
+DOC_PATH = BASE / "activities.md"  # used only for (re)building the index
+
+def build_index():
+    """(Re)create data/retrieval_index.json from activities.md."""
+    text = DOC_PATH.read_text(encoding="utf-8")
+    # heading-aware chunking (same approach as Step 2)
+    parts = re.split(r'(^## .*?$)', text, flags=re.M)
+    chunks_local, heading = [], ""
+    for p in parts:
+        s = p.strip()
+        if not s:
+            continue
+        if s.startswith("## "):
+            heading = s
+        else:
+            chunks_local.append(f"{heading}\n{s}" if heading else s)
+
+    # embed all chunks using the small, cheap model
+    emb = client.embeddings.create(model="text-embedding-3-small", input=chunks_local)
+    chunk_vecs_local = [d.embedding for d in emb.data]
+
+    artifact = {
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "model": "text-embedding-3-small",
+        "doc": str(DOC_PATH),
+        "chunks": chunks_local,
+        "embeddings": chunk_vecs_local,
+    }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    INDEX_PATH.write_text(json.dumps(artifact), encoding="utf-8")
+
+def load_index():
+    """Load chunks + embeddings from the saved JSON into globals."""
+    global chunks, chunk_embeds, embedding_model
+    artifact_local = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    chunks = artifact_local["chunks"]                      # list[str]
+    chunk_embeds = artifact_local["embeddings"]            # list[list[float]]
+    embedding_model = artifact_local.get("model", "text-embedding-3-small")
+
 # ---------- Load system prompt ----------
 if SYSTEM_PROMPT_PATH.exists():
     SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
 else:
-     # fallback so the app still runs if the file is missing
-
-     SYSTEM_PROMPT = (
-         "You are Sanuwar’s assistant. Be friendly and concise. "
+    # fallback so the app still runs if the file is missing
+    SYSTEM_PROMPT = (
+        "You are Sanuwar’s assistant. Be friendly and concise. "
         "If the message is a greeting/thanks/farewell, reply naturally in one short sentence. "
         "For factual questions, use ONLY the provided Context. "
         "If the answer is not in the Context, reply exactly: \"I do not know.\""
-     )
-
-# ---------- Load retrieval index (built in Step 2) ----------
-
-if not INDEX_PATH.exists():
-    raise FileNotFoundError(
-        f"Missing {INDEX_PATH}. Run Step 2 to create data/retrieval_index.json."
     )
 
-artifact = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-chunks = artifact["chunks"]                      # list[str]
-chunk_embeds = artifact["embeddings"]            # list[list[float]]
-embedding_model = artifact.get("model", "text-embedding-3-small")
+# ---------- Load (or rebuild) retrieval index ----------
+if (not INDEX_PATH.exists()) or os.getenv("REBUILD_INDEX") == "1":
+    # On Hugging Face, set REBUILD_INDEX=1 under “Settings → Variables and secrets”
+    # to regenerate after updating activities.md, then remove it again.
+    build_index()
+
+load_index()  # populates: chunks, chunk_embeds, embedding_model
 
 # ---------- Tiny search (embed query + cosine) ----------
 def embed_query(text: str):
@@ -108,8 +138,7 @@ def ask_bot(user_message: str) -> str:
     )
     answer = resp.choices[0].message.content.strip()
 
-
-# If the model couldn't find an answer in the context, we log the question
+    # If the model couldn't find an answer in the context, we log the question
     if "i do not know" in answer.lower():
         log_unknown(user_message)
 
@@ -148,7 +177,7 @@ with gr.Blocks(title="Meet Sanuwar") as demo:
     # Clicking Send sends
     send.click(on_send, inputs=[msg, name, email, chat], outputs=[chat, msg])
 
-    # NEW: Save contact by button OR pressing Enter in name/email
+    # Save contact by button OR pressing Enter in name/email
     save.click(on_save_contact, inputs=[name, email], outputs=[status])
     name.submit(on_save_contact, inputs=[name, email], outputs=[status])
     email.submit(on_save_contact, inputs=[name, email], outputs=[status])

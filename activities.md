@@ -47,7 +47,7 @@ Versatile Automation Engineer with 15+ years of combined **industry and academic
 - Implemented scripts for real-time latency anomaly detection.  
 - Supported backend retraining pipelines and data ingestion workflows.  
 
-**Senior Executive – Quality Control, Bangladesh Export & Import Corporation (2006–2007)**  
+**Senior Executive – Quality Control, Bangladesh Export & Import Corporation (Beximco) (2006–2007)**  
 - Designed and implemented process improvement action plans.  
 - Resolved textile quality issues related to yarn and fabric performance.  
 - Conducted statistical analysis of raw materials and fabrics using industry-standard equipment (HVI, AFIS, Uster, Tensorapid).  
